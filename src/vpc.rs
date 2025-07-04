@@ -6,9 +6,29 @@ use std::{
 };
 
 use ipnet::Ipv4Net;
+use snafu::{
+  OptionExt,
+  ResultExt,
+  Snafu,
+};
+
+#[derive(Snafu, Debug)]
+pub enum Error {
+  #[snafu(display("Subnet not found: {:?}", subnet_id))]
+  SubnetNotFound { subnet_id: SubnetID },
+  #[snafu(display("Private Network not found: {:?}", pn_id))]
+  PnNotFound { pn_id: PnId },
+  #[snafu(display("Subnet {:?} overlaps with existing subnet {:?} in PN {:?}", subnet_id, other_id, pn_id))]
+  SubnetOverlap {
+    subnet_id: SubnetID,
+    other_id: SubnetID,
+    pn_id: PnId,
+  },
+}
 
 pub trait Vpc {
   fn find_pn_by_subnet(&self, subnet_id: &SubnetID) -> Option<&PrivateNetwork>;
+  fn add_subnet(&mut self, pn_id: PnId, subnet: Subnet) -> Result<(), Error>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -79,6 +99,22 @@ impl VpcApiMock {
 
     Self { pns }
   }
+
+  fn check_if_subnet_overlaps(
+    pn: &PrivateNetwork,
+    subnet: &Subnet,
+  ) -> Result<(), Error> {
+    pn.subnets
+      .values()
+      .find(|s| s.cidr.contains(&subnet.cidr) || subnet.cidr.contains(&s.cidr))
+      .map_or(Ok(()), |other_id| {
+        Err(Error::SubnetOverlap {
+          subnet_id: subnet.id.clone(),
+          other_id: other_id.id.clone(),
+          pn_id: pn.id.clone(),
+        })
+      })
+  }
 }
 
 impl Vpc for VpcApiMock {
@@ -87,5 +123,17 @@ impl Vpc for VpcApiMock {
       .pns
       .values()
       .find(|pn| pn.subnets.contains_key(&subnet_id))
+  }
+
+  fn add_subnet(&mut self, pn_id: PnId, subnet: Subnet) -> Result<(), Error> {
+    let pn = self.pns.get_mut(&pn_id).with_context(|| PnNotFoundSnafu {
+      pn_id: pn_id.clone(),
+    })?;
+
+    Self::check_if_subnet_overlaps(pn, &subnet)?;
+
+    pn.subnets.insert(subnet.id.clone(), subnet);
+
+    Ok(())
   }
 }
