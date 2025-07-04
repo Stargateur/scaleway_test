@@ -1,0 +1,11 @@
+[package]
+name = "scaleway_test"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+dhcproto = "0.13.0"
+ipnet = "2.11.0"
+snafu = "0.8.6"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1.41"
